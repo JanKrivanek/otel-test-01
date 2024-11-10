@@ -79,7 +79,7 @@ class Program
                 .AddOtlpExporter()
                 .Build();
 
-        // Microsoft.VisualStudio.OpenTelemetry.Collector.
+       //  Microsoft.VisualStudio.OpenTelemetry.Collector.
 
         var my = host.Services.GetRequiredService<Testing>();
         await my.ExecuteAsync();
