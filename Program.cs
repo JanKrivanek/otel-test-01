@@ -3,10 +3,13 @@ using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.VisualStudio.OpenTelemetry.ClientExtensions.Exporters;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Microsoft.VisualStudio.OpenTelemetry.ClientExtensions;
+using Microsoft.VisualStudio.OpenTelemetry.Collector.Settings;
 
 namespace otel_test_01;
 
@@ -16,6 +19,7 @@ class Program
     /// Needed so that we can dispose the tracer on exit.
     /// </summary>
     private static TracerProvider tracerHolder = null;
+    private static MeterProvider meterHolder = null;
 
     static async Task Main(string[] args)
     {
@@ -58,16 +62,29 @@ class Program
             )
             .Build();
 
-        Sdk.CreateMeterProviderBuilder().AddMeter(Testing.MeterName, Testing.MeterName + "2").Build();
+        const string vsMajorVersion = "17.0";
 
+        // 1. Configure Export Settings as needed via our hooks​
+        var settings = OpenTelemetryExporterSettingsBuilder​
+            .CreateVSDefault(vsMajorVersion)
+            .Build();
 
         var resource = ResourceBuilder
             .CreateDefault()
-            .AddService(".NET CLR OpenTelemetry Hook", "2.0.1");
+            .AddService("MSBuild telemetry source", "2.0.1");
+
+        meterHolder = Sdk
+            .CreateMeterProviderBuilder()
+            .AddMeter(Testing.MeterName, Testing.MeterName + "2")
+            .SetResourceBuilder(resource)
+            .AddVisualStudioDefaultMetricExporter(settings)
+            .AddOtlpExporter()
+            .Build();
 
         var tracer =
             Sdk
                 .CreateTracerProviderBuilder()
+                .AddVisualStudioDefaultTraceExporter(settings)
                 .SetResourceBuilder(resource);
 
         
@@ -79,19 +96,28 @@ class Program
                 .AddOtlpExporter()
                 .Build();
 
-       //  Microsoft.VisualStudio.OpenTelemetry.Collector.
+        //  Microsoft.VisualStudio.OpenTelemetry.Collector.
+        var collectorSettings = OpenTelemetryCollectorSettingsBuilder​
+            .CreateVSDefault("17.0")
+            .Build();
+
+        using var collector = OpenTelemetryCollectorProvider​
+            .CreateCollector(collectorSettings);
+        // intentionally not awaiting - to continue with the app.
+        collector.StartAsync();
 
         var my = host.Services.GetRequiredService<Testing>();
         await my.ExecuteAsync();
 
         tracerHolder.Dispose();
+        meterHolder.Dispose();
     }
 }
 
 class Testing
 {
-    public const string MeterName = "OTel.Example";
-    public const string ActivityName = "OTel.ExampleAct";
+    public const string MeterName = "MSBuild.ExampleMeter";
+    public const string ActivityName = "MSBuild.ExampleActivity";
     private readonly ILogger<Testing> _logger;
 
     public Testing(ILogger<Testing> logger)
@@ -137,8 +163,8 @@ class Testing
         // Custom metrics for the application
         greeterMeter = new Meter(MeterName, "1.0.0");
         greeterMeter2 = new Meter(MeterName + "2", "1.0.0");
-        countGreetings = greeterMeter.CreateCounter<int>("greetings.count", description: "Counts the number of greetings");
-        countGreetings2 = greeterMeter2.CreateCounter<double>("another.count", description: "Counts smth");
+        countGreetings = greeterMeter.CreateCounter<int>("msbuild.something.count", description: "Counts the number of something");
+        countGreetings2 = greeterMeter2.CreateCounter<double>("msbuild.another.count", description: "Counts smth other");
         
         greeterActivitySource = new ActivitySource(ActivityName);
     }
